@@ -1,4 +1,5 @@
 import os
+import asyncio
 import threading
 from dotenv import load_dotenv
 from flask import Flask, jsonify, request
@@ -14,7 +15,7 @@ AGENT_AUTH_KEY = os.getenv("AGENT_AUTH_KEY")
 
 pending_command = None
 
-# --- Telegram Logic ---
+# --- Telegram Handlers ---
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != AUTHORIZED_USER_ID:
         return
@@ -39,13 +40,20 @@ async def status(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     await update.message.reply_text(f"Pending action: {pending_command or 'None'}")
 
+# --- Fixed Thread Logic ---
 def run_telegram():
+    # Explicitly create and set a new event loop for this background thread
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    
     app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("lock", lock))
     app.add_handler(CommandHandler("shutdown", shutdown))
     app.add_handler(CommandHandler("status", status))
-    app.run_polling()
+    
+    # Run polling on the newly created event loop
+    app.run_polling(stop_signals=None)
 
 # --- Flask Server ---
 flask_app = Flask(__name__)
@@ -58,10 +66,10 @@ def poll_command():
         return jsonify({"error": "Unauthorized"}), 401
     
     cmd = pending_command
-    pending_command = None  # Consume command
+    pending_command = None  # Clear once fetched
     return jsonify({"action": cmd})
 
-# Start Telegram thread on startup
+# Start Telegram bot thread
 threading.Thread(target=run_telegram, daemon=True).start()
 
 if __name__ == "__main__":
